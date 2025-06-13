@@ -28,10 +28,8 @@ skylite_proc::node_definition! {
 
     #[skylite_proc::init]
     fn init(node: &mut Sky) {
-        let (sections, lines) = generate_sky(node.properties.seed);
-        for star_params in sections.into_iter().flatten() {
-            node.get_dynamic_nodes_mut().push(Box::new(Star::new(star_params.x, star_params.y, true)));
-        }
+        let mut nodes = generate_sky(node.properties.seed);
+        node.get_dynamic_nodes_mut().append(&mut nodes);
     }
 
     fn get_star_idx_at(node: &mut Sky, x: i16, y: i16) -> Option<usize> {
