@@ -87,12 +87,7 @@ pub(crate) fn draw_line(
             continue;
         }
 
-        let color = get_color(
-            style,
-            steps as u32,
-            i as u32,
-            ctx.get_update_count(),
-        );
+        let color = get_color(style, steps as u32, i as u32, ctx.get_update_count());
 
         if color == 0 {
             continue;
@@ -110,31 +105,50 @@ pub(crate) fn draw_line(
     }
 }
 
-skylite_proc::node_definition! {
+#[skylite_proc::node_definition("./project/project.scm", "link")]
+mod link {
     use crate::Aoc;
 
-    skylite_proc::asset_file!("./project/project.scm", "link");
+    pub(crate) struct Link {
+        pub start_idx: u16,
+        pub end_idx: u16,
+        pub style: u8,
+    }
 
-    #[skylite_proc::create_properties]
-    fn create_properties(start_idx: u16, end_idx: u16, style: u8) -> LinkProperties {
-        LinkProperties {
-            start_idx, end_idx, style
+    impl Link {
+        #[skylite_proc::new]
+        pub(crate) fn new(start_idx: u16, end_idx: u16, style: u8) -> Link {
+            Link {
+                start_idx,
+                end_idx,
+                style,
+            }
         }
     }
 }
+pub(crate) use link::*;
 
-skylite_proc::node_definition! {
+#[skylite_proc::node_definition("./project/project.scm", "draft-line")]
+mod draft_line {
     use crate::Aoc;
 
-    skylite_proc::asset_file!("./project/project.scm", "draft-line");
+    pub(crate) struct DraftLine {
+        pub start_idx: u16,
+        pub end_x: i16,
+        pub end_y: i16,
+        pub visible: bool,
+    }
 
-    #[skylite_proc::create_properties]
-    fn create_properties() -> DraftLineProperties {
-        DraftLineProperties {
-            start_idx: 0,
-            end_x: 0,
-            end_y: 0,
-            visible: false
+    impl DraftLine {
+        #[skylite_proc::new]
+        pub(crate) fn new() -> DraftLine {
+            DraftLine {
+                start_idx: 0,
+                end_x: 0,
+                end_y: 0,
+                visible: false,
+            }
         }
     }
 }
+pub(crate) use draft_line::*;

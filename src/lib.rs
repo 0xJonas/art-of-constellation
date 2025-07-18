@@ -3,6 +3,8 @@ use std::{cell::RefCell, panic::{set_hook, PanicHookInfo}};
 use skylite_core::SkyliteProject;
 use wasm4_target::{trace, w4alloc::W4Alloc, Wasm4Target};
 
+use crate::aoc::Aoc;
+
 mod star;
 mod sky;
 mod line;
@@ -11,12 +13,10 @@ mod util;
 #[global_allocator]
 static ALLOC: W4Alloc = W4Alloc::new();
 
-skylite_proc::skylite_project! {
+#[skylite_proc::skylite_project("./project/project.scm", Wasm4Target)]
+mod aoc {
     use wasm4_target::Wasm4Target;
     use crate::sky::Sky;
-
-    skylite_proc::target_type!(Wasm4Target);
-    skylite_proc::project_file!("./project/project.scm");
 }
 
 thread_local! {
