@@ -6,7 +6,7 @@ mod sky {
     use crate::Aoc;
     use crate::line::{DraftLine, Link, STYLE_BRIGHT, STYLE_DASHED, STYLE_DIM, draw_line};
     use crate::star::Star;
-    use crate::util::{generate_sky, get_constellation};
+    use crate::util::{dim_lonely_stars, generate_sky, get_constellation, CONSTELLATION_THRESHOLD};
     use skylite_core::{ProjectControls, RenderControls};
     use wasm4_target::{MOUSE_X, MOUSE_Y};
 
@@ -14,6 +14,7 @@ mod sky {
         prev_mouse_down: bool,
         scroll_sub_x: f32,
         scroll_sub_y: f32,
+        sections: Vec<Vec<u16>>,
         #[skylite_proc::nodes]
         stars: Vec<Star>,
         #[skylite_proc::nodes]
@@ -31,11 +32,12 @@ mod sky {
     impl Sky {
         #[skylite_proc::new]
         fn new(seed: u32) -> Sky {
-            let (stars, links) = generate_sky(seed);
+            let (sections, stars, links) = generate_sky(seed);
             Sky {
                 prev_mouse_down: false,
                 scroll_sub_x: 0.0,
                 scroll_sub_y: 0.0,
+                sections,
                 stars,
                 links,
                 draft_line: DraftLine::new(),
@@ -171,7 +173,7 @@ mod sky {
             self.hud.light -= 1;
 
             let constellation = get_constellation(&self.links, end_idx);
-            if constellation.0.len() >= 8 {
+            if constellation.0.len() >= CONSTELLATION_THRESHOLD {
                 self.hud.light += (constellation.0.len() - 4) as u8;
 
                 for star_idx in constellation.0 {
@@ -181,6 +183,8 @@ mod sky {
                 for link_idx in constellation.1 {
                     self.links[link_idx as usize].style = STYLE_DIM;
                 }
+
+                dim_lonely_stars(&self.sections, &mut self.stars, &mut self.links);
             }
         }
 

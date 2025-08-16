@@ -1,5 +1,5 @@
 use super::star::Star;
-use crate::line::{Link, STYLE_BRIGHT};
+use crate::line::{Link, STYLE_BRIGHT, STYLE_DIM};
 
 pub(crate) fn next_random(state: &mut u32) -> u32 {
     *state = ((*state as u64 * 134775813 + 1) & 0xffff_ffff) as u32;
@@ -43,6 +43,9 @@ const PRESET_LINE_CHANCE: f32 = 0.4;
 /// The maximum number of stars that can be pre-connected.
 const MAX_PRESET_CONSTELLATION_SIZE: usize = 3;
 
+/// When a constellation exceeds this many stars, it will be locked in.
+pub(crate) const CONSTELLATION_THRESHOLD: usize = 8;
+
 fn neighboring_section_indices(section_idx: usize) -> impl Iterator<Item = usize> {
     let section_x = section_idx % SKY_WIDTH_SECTIONS;
     let section_y = section_idx / SKY_WIDTH_SECTIONS;
@@ -65,12 +68,7 @@ fn neighboring_section_indices(section_idx: usize) -> impl Iterator<Item = usize
     })
 }
 
-fn check_distances(
-    sections: &Vec<Vec<usize>>,
-    stars: &[Star],
-    x: i16,
-    y: i16,
-) -> Option<(i16, i16)> {
+fn check_distances(sections: &Vec<Vec<u16>>, stars: &[Star], x: i16, y: i16) -> Option<(i16, i16)> {
     let section_x = (x as usize / SECTION_WIDTH) as i16;
     let section_y = (y as usize / SECTION_HEIGHT) as i16;
     let section = (section_y as usize * SKY_WIDTH_SECTIONS) + section_x as usize;
@@ -81,10 +79,12 @@ fn check_distances(
 
     for idx in neighboring_section_indices(section) {
         for star_node_idx in &sections[idx] {
-            let star = &stars[*star_node_idx];
+            let star = &stars[*star_node_idx as usize];
             let dx = (x - star.x) as i32;
             let dy = (y - star.y) as i32;
-            let dist = (dx * dx + dy * dy).isqrt();
+            // Add 1 here, to avoid allowing too large distances,
+            // because isqrt rounds down.
+            let dist = (dx * dx + dy * dy).isqrt() + 1;
 
             if dist == 0 {
                 // Star is identical to another star, use arbitrary adjustment.
@@ -135,7 +135,7 @@ fn is_in_bounds(x: i16, y: i16) -> bool {
 
 fn add_star(
     star: Star,
-    sections: &mut Vec<Vec<usize>>,
+    sections: &mut Vec<Vec<u16>>,
     filled_section_indices: &mut Vec<usize>,
     stars: &mut Vec<Star>,
 ) -> Option<(usize, usize)> {
@@ -151,7 +151,7 @@ fn add_star(
     }
 
     let section_idx = (section_y as usize * SKY_WIDTH_SECTIONS) + section_x as usize;
-    sections[section_idx].push(stars.len());
+    sections[section_idx].push(stars.len() as u16);
     stars.push(star);
 
     if !filled_section_indices.contains(&section_idx) {
@@ -161,32 +161,37 @@ fn add_star(
     Some((section_idx, sections[section_idx].len() - 1))
 }
 
-fn get_closest_star_idx(
-    sections: &Vec<Vec<usize>>,
+fn get_stars_within_range(
+    sections: &Vec<Vec<u16>>,
     stars: &[Star],
     base_section_idx: usize,
     base_idx: usize,
-) -> (usize, usize) {
-    let mut closest_dist_sq = i32::MAX;
-    let mut closest_idx = 0;
-    let base_star_idx = sections[base_section_idx][base_idx];
+    max_distance: usize,
+) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let base_star_idx = sections[base_section_idx][base_idx] as usize;
+    let max_dist_sq = (max_distance * max_distance) as i32;
     for section_idx in neighboring_section_indices(base_section_idx) {
-        for (idx, star_idx) in sections[section_idx].iter().enumerate() {
+        for (idx, star_idx_u16) in sections[section_idx].iter().enumerate() {
+            let star_idx = *star_idx_u16 as usize;
             if section_idx == base_section_idx && idx == base_idx {
                 continue; // Skip the star itself
             }
 
-            let dx = (stars[*star_idx].x - stars[base_star_idx].x) as i32;
-            let dy = (stars[*star_idx].y - stars[base_star_idx].y) as i32;
+            if !stars[star_idx].bright {
+                continue; // Skip dim stars, as these cannot be connected to.
+            }
+
+            let dx = (stars[star_idx].x - stars[base_star_idx].x) as i32;
+            let dy = (stars[star_idx].y - stars[base_star_idx].y) as i32;
             let dist_sq = dx * dx + dy * dy;
 
-            if dist_sq < closest_dist_sq {
-                closest_dist_sq = dist_sq;
-                closest_idx = *star_idx;
+            if dist_sq <= max_dist_sq {
+                out.push((section_idx, idx))
             }
         }
     }
-    (closest_idx, closest_dist_sq.isqrt() as usize)
+    out
 }
 
 pub(crate) fn get_constellation(links: &[Link], start_idx: usize) -> (Vec<u16>, Vec<u16>) {
@@ -218,26 +223,34 @@ pub(crate) fn get_constellation(links: &[Link], start_idx: usize) -> (Vec<u16>, 
 fn handle_preset_line(
     stars: &[Star],
     links: &mut Vec<Link>,
-    sections: &Vec<Vec<usize>>,
+    sections: &Vec<Vec<u16>>,
     new_star_section_idx: usize,
     new_star_idx: usize,
     rng: &mut u32,
 ) {
-    let (closest_star_idx, closest_dist) =
-        get_closest_star_idx(sections, stars, new_star_section_idx, new_star_idx);
-
-    if closest_dist > STAR_DIST_MAX_FOR_PRESET_LINE {
-        return; // Not close enough for preset line
-    }
-
-    let constellation_size = get_constellation(links, closest_star_idx).0.len();
-    if constellation_size >= MAX_PRESET_CONSTELLATION_SIZE {
-        return; // Too many stars already connected
+    let close_stars = get_stars_within_range(
+        sections,
+        stars,
+        new_star_section_idx,
+        new_star_idx,
+        STAR_DIST_MAX_FOR_PRESET_LINE,
+    );
+    if close_stars.is_empty() {
+        return;
     }
 
     if next_random(rng) as f32 / (u32::MAX as f32) < PRESET_LINE_CHANCE {
+        let close_star_idx = next_random(rng) as usize % close_stars.len();
+        let (target_section, target_idx) = close_stars[close_star_idx];
+        let target_star_idx = sections[target_section][target_idx] as usize;
+
+        let constellation_size = get_constellation(links, target_star_idx).0.len();
+        if constellation_size >= MAX_PRESET_CONSTELLATION_SIZE {
+            return; // Too many stars already connected
+        }
+
         let new_line = Link::new(
-            closest_star_idx as u16,
+            target_star_idx as u16,
             sections[new_star_section_idx][new_star_idx] as u16,
             STYLE_BRIGHT,
         );
@@ -245,7 +258,7 @@ fn handle_preset_line(
     }
 }
 
-pub(crate) fn generate_sky(mut seed: u32) -> (Vec<Star>, Vec<Link>) {
+pub(crate) fn generate_sky(mut seed: u32) -> (Vec<Vec<u16>>, Vec<Star>, Vec<Link>) {
     let mut sections = vec![Vec::with_capacity(8); SKY_WIDTH_SECTIONS * SKY_HEIGHT_SECTIONS];
     let mut stars = vec![];
     let mut links = vec![];
@@ -299,5 +312,90 @@ pub(crate) fn generate_sky(mut seed: u32) -> (Vec<Star>, Vec<Link>) {
         }
     }
 
-    (stars, links)
+    (sections, stars, links)
+}
+
+fn collect_reachable_stars(
+    sections: &Vec<Vec<u16>>,
+    stars: &[Star],
+    base_section_idx: usize,
+    base_star_idx: usize,
+) -> Vec<(usize, usize)> {
+    let mut current_cluster = Vec::new();
+    let mut open_start = 0;
+
+    current_cluster.push((base_section_idx, base_star_idx));
+
+    while open_start < current_cluster.len() {
+        let (section_idx, star_idx) = current_cluster[open_start];
+        open_start += 1;
+
+        let reachable_stars = get_stars_within_range(
+            sections,
+            stars,
+            section_idx,
+            star_idx,
+            STAR_DIST_MAX_FOR_LINE,
+        );
+        for star in reachable_stars {
+            if !current_cluster.contains(&star) {
+                current_cluster.push(star);
+            }
+        }
+    }
+    current_cluster
+}
+
+pub(crate) fn dim_lonely_stars(sections: &Vec<Vec<u16>>, stars: &mut [Star], links: &mut [Link]) {
+    #[derive(Clone, Copy)]
+    enum StarState {
+        Unknown,
+        Ok,
+        Unreachable,
+    }
+    let mut state = Vec::with_capacity(stars.len());
+
+    for star in stars.iter() {
+        if !star.bright {
+            state.push(StarState::Ok);
+        } else {
+            state.push(StarState::Unknown);
+        }
+    }
+
+    // Mark stars which can still be part of a constellation
+    for base_section_idx in 0..sections.len() {
+        for base_star_idx in 0..sections[base_section_idx].len() {
+            if let StarState::Unknown = state[sections[base_section_idx][base_star_idx] as usize] {
+                let cluster =
+                    collect_reachable_stars(sections, stars, base_section_idx, base_star_idx);
+
+                let new_state = if cluster.len() >= CONSTELLATION_THRESHOLD {
+                    StarState::Ok
+                } else {
+                    StarState::Unreachable
+                };
+
+                for star in cluster {
+                    let (section_idx, star_idx) = star;
+                    state[sections[section_idx][star_idx] as usize] = new_state;
+                }
+            }
+        }
+    }
+
+    // Dim lonely stars
+    for (idx, state) in state.iter().enumerate() {
+        if let StarState::Unreachable = state {
+            stars[idx].bright = false;
+        }
+    }
+
+    for link in links.iter_mut() {
+        if link.style == STYLE_BRIGHT
+            && (!stars[link.start_idx as usize].bright || !stars[link.end_idx as usize].bright)
+        {
+            link.style = STYLE_DIM;
+        }
+    }
 }
