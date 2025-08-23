@@ -6,6 +6,7 @@ use wasm4_target::{trace, w4alloc::W4Alloc, Wasm4Target};
 use crate::aoc::Aoc;
 
 mod star;
+mod interactive_sky;
 mod sky;
 mod line;
 mod util;
@@ -16,7 +17,7 @@ static ALLOC: W4Alloc = W4Alloc::new();
 #[skylite_proc::skylite_project("./project/project.scm", Wasm4Target)]
 mod aoc {
     use wasm4_target::Wasm4Target;
-    use crate::sky::Sky;
+    use crate::interactive_sky::InteractiveSky;
 }
 
 thread_local! {

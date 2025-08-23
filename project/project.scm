@@ -1,3 +1,3 @@
 '((name . AOC)
-  (root-node . (sky 123456))
+  (root-node . (interactive-sky 123456))
   (tile-types . (dummy)))
